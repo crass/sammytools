@@ -32,6 +32,7 @@ import sys
 import os
 import struct
 import cStringIO as StringIO
+import zlib
 
 from Crypto.Util import strxor
 from Crypto.Cipher import AES
@@ -46,7 +47,7 @@ class RUFSubfile(object):
 
 class RUFHeader(object):
     commonhdr_fmt = "6s4s2s32s8s32s"
-    subfile_fmt = 'III4s'
+    subfile_fmt = 'III'
     model_fmts = {
         'C6900': '31s5s',
         'C5500': '33s5s',
@@ -86,6 +87,7 @@ class RUFHeader(object):
         # Make sure integers are read with the correct endianness
         e='<'
         if rufh.endian == 'BE':
+            # Big Endian
             e = '>'
         
         model_fmt = model_fmts[rufh.model]
@@ -104,10 +106,10 @@ class RUFHeader(object):
             subfilehdr = fileobj.read(RUFHeader.subfilehdrsz)
             rs = RUFSubfile()
             #~ print '>>', repr(subfilehdr[:16])
-            rs.num, rs.size, rs.raw1, rs.raw2 \
-                = struct.unpack(e+subfile_fmt, subfilehdr[:16])
+            rs.num, rs.size, rs.crc32 \
+                = struct.unpack(e+subfile_fmt, subfilehdr[:12])
             if rs.num > 0:
-                #~ print 'Got part num:', rs.num, rs.size
+                #~ print 'Got part num:', rs.num, rs.size, rs.crc32
                 rs.name = RUFHeader.fileparts[rs.num-1]
                 rufh.subfiles.append(rs)
                 subfileleft -= 1
@@ -124,43 +126,61 @@ class RUFHeader(object):
         return rufh
 
 
-def decryptRUF(file, blocksz=64*1024):
-    ""
-    rufh = RUFHeader.parse(file)
-    outfile = StringIO.StringIO()
+class RUFFile(object):
+    def __init__(self, file):
+        if isinstance(file, basestring):
+            file = open(file, 'rb')
+        self.file = file
+        self.rufh = RUFHeader.parse(file)
+        self.decrypted = None
     
-    file.seek(0, 2)
-    filesz = file.tell()
-    file.seek(0)
+    def decrypt(self, blocksz=64*1024):
+        ""
+        file = self.file
+        rufh = self.rufh
+        outfile = StringIO.StringIO()
+        
+        file.seek(0, 2)
+        filesz = file.tell()
+        file.seek(0)
+        
+        print "Decrypting firmware file (%d) ..."%filesz,
+        sys.stdout.flush()
+        
+        # Write out unencrypted header
+        outfile.write(file.read(rufh.headersz))
+        
+        assert (rufh.size%AES.block_size) == 0, 'Encrypted size must be a multiple of cipher block size'
+        # Decrypt and write
+        aes = AES.new(MODEL_KEYS[rufh.model], AES.MODE_CBC, IV='\x00'*AES.block_size)
+        outfile.write(aes.decrypt(file.read(rufh.size)))
+        
+        # Read the rest of the file and copy directly into outfile
+        outfile.write(file.read())
+        
+        print "Done"
+        
+        outfile.seek(0)
+        self.decrypted = outfile
+        return outfile
     
-    print "Decrypting firmware file (%d) ..."%filesz,
-    sys.stdout.flush()
-    
-    # Write out unencrypted header
-    outfile.write(file.read(rufh.headersz))
-    
-    assert (rufh.size%AES.block_size) == 0, 'Encrypted size must be a multiple of cipher block size'
-    # Decrypt and write
-    aes = AES.new(MODEL_KEYS[rufh.model], AES.MODE_CBC, IV='\x00'*AES.block_size)
-    outfile.write(aes.decrypt(file.read(rufh.size)))
-    
-    # Read the rest of the file and copy directly into outfile
-    outfile.write(file.read())
-    
-    print "Done"
-    
-    outfile.seek(0)
-    return outfile
-
-def extractRUF(file, dirpath):
-    " Extract file parts "
-    rufh = RUFHeader.parse(file)
-    file.seek(rufh.headersz)
-    for subfile in rufh.subfiles:
-        print 'Writing part: %s (%s)'%(subfile.name, subfile.size)
-        partpath = os.path.join(dirpath, '%02d.%s'%(subfile.num, subfile.name))
-        partfile = open(partpath, 'wb')
-        partfile.write(file.read(subfile.size))
+    def extract(self, dirpath):
+        " Extract file parts "
+        if not self.decrypted:
+            self.decrypt()
+        file = self.decrypted
+        rufh = self.rufh
+        file.seek(rufh.headersz)
+        for subfile in rufh.subfiles:
+            print 'Writing part: %s (%s)'%(subfile.name, subfile.size)
+            partpath = os.path.join(dirpath, '%02d.%s'%(subfile.num, subfile.name))
+            partfile = open(partpath, 'wb')
+            partdata = file.read(subfile.size)
+            # validate crc
+            #~ crc = zlib.crc32(partdata)
+            #~ adler = zlib.adler32(partdata)
+            #~ print "CRC:", subfile.crc32, crc, adler
+            partfile.write(partdata)
 
 
 def main(argv):
@@ -169,8 +189,7 @@ def main(argv):
             basepath, ext = os.path.splitext(path)
             if not os.path.isdir(basepath):
                 os.makedirs(basepath)
-            file = open(path, 'rb')
-            extractRUF(decryptRUF(file), basepath)
+            RUFFile(path).extract(basepath)
         except Exception, e:
             print "Failed to extract %s: %s"%(path, str(e))
             import traceback
