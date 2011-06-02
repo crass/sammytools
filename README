@@ -1,0 +1,11 @@
+
+Tools
+=====
+
+decrypt_fw_samsung -- C program to decrypt samsung firmware (only certain
+    models supported because a decryption key is needed per model).  Can
+    only be compiled to decrypt a particular device model.
+
+decrypt_fw_samsung.py -- A python version of decrypt_fw_samsung.  Its
+    slightly more versatile in that it will dynamically decrypt firmwares
+    based on the model info in the header.
