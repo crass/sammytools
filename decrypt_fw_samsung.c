@@ -16,6 +16,12 @@
 #include <zlib.h>
 
 
+#ifndef MODEL
+#define MODEL 0x5500
+#endif
+#define C5500 0x5500
+#define C6900 0x6900
+
 typedef struct {
     unsigned char                   v1[4];
     unsigned char                   v2[4];
@@ -31,7 +37,11 @@ typedef struct {
     char                            string[32];
     char                            model1[8];
     char                            model2[32];
+#if MODEL == C6900
     char                            model3[31];
+#elif MODEL == C5500
+    char                            model3[33];
+#endif
     char                            model4[5];
     unsigned char                   size[4];
 } sam_flash_struct_t;
@@ -85,10 +95,13 @@ int main(int argc, char *argv[])
     unsigned char                  *inbuf, *outbuf;
     unsigned char                   iv_init[0x10] = { 0, };
     unsigned char                   mkey[] =
+#if MODEL == C6900
         // BD-C6900
-        //~ { 0xEA, 0xEA, 0x51, 0x2D, 0xA9, 0x1F, 0x87, 0xE1, 0xC4, 0x15, 0x4C, 0x3E, 0xDB, 0x7A, 0xAD, 0xB8 };
+        { 0xEA, 0xEA, 0x51, 0x2D, 0xA9, 0x1F, 0x87, 0xE1, 0xC4, 0x15, 0x4C, 0x3E, 0xDB, 0x7A, 0xAD, 0xB8 };
+#elif MODEL == C5500
         // BD-C5500
         { 0x48, 0x77, 0x81, 0x5A, 0x17, 0x51, 0x14, 0x80, 0xF9, 0xD1, 0x5B, 0xDF, 0xE3, 0x0C, 0x21, 0x63 };
+#endif
 
     int                             decrypt_point = 0;
     int                             subfile_count = 0;
@@ -139,7 +152,7 @@ int main(int argc, char *argv[])
         memset(outbuf, 0, filesize + 0x40);
 
         // Reading and decryption
-        printf("Decrypting firmware file (%d) ... \n", filesize);
+        printf("Decrypting firmware file (%d) ... ", filesize);
         fflush(stdout);
         fread(inbuf, filesize, 1, inputfp);
         flash_file = (sam_flash_struct_t *) inbuf;
@@ -174,7 +187,7 @@ int main(int argc, char *argv[])
             f = swap_endian(flash_subfiles->v1);
             s = swap_endian(flash_subfiles->v2);
             if (s > filesize) {
-                fprintf(stderr, "%s: Wrong header format. Abotring\n", argv[b]);
+                fprintf(stderr, "%s: Wrong header format. Aborting\n", argv[b]);
                 return 2;
             }
             if (f) {
