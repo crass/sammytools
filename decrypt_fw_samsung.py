@@ -1,4 +1,32 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Add subtitle files in the same directory as videos containing the subtitles
+# with the same name, but apropriate subtitle extension.
+# Copyright 2011 crass <crass@berlios.de>
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#   1. Redistributions of source code must retain the above copyright notice,
+#      this list of conditions and the following disclaimer.
+#   2. Redistributions in binary form must reproduce the above copyright notice,
+#      this list of conditions and the following disclaimer in the documentation
+#      and/or other materials provided with the distribution.
+#   3. The name of the author may not be used to endorse or promote products
+#      derived from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+# WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+# EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 
 import sys
 import os
@@ -108,19 +136,13 @@ def decryptRUF(file, blocksz=64*1024):
     print "Decrypting firmware file (%d) ..."%filesz,
     sys.stdout.flush()
     
+    # Write out unencrypted header
     outfile.write(file.read(rufh.headersz))
     
-    assert (rufh.size%16) == 0, 'Encrypted size must be a multiple of cipher block size'
-    iv = '\x00'*16
-    aes = AES.new(MODEL_KEYS[rufh.model])
-    for i in xrange(0, rufh.size/16):
-        #~ if (i % (1024*1024)) == 0:
-            #~ print "i = %s" % i
-        ctext = file.read(16)
-        plain = aes.decrypt(ctext)
-        plain = strxor.strxor(plain, iv)
-        outfile.write(plain)
-        iv = ctext
+    assert (rufh.size%AES.block_size) == 0, 'Encrypted size must be a multiple of cipher block size'
+    # Decrypt and write
+    aes = AES.new(MODEL_KEYS[rufh.model], AES.MODE_CBC, IV='\x00'*AES.block_size)
+    outfile.write(aes.decrypt(file.read(rufh.size)))
     
     # Read the rest of the file and copy directly into outfile
     outfile.write(file.read())
